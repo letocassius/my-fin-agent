@@ -75,6 +75,9 @@
   - 用于查询分类、市场问答生成、知识问答生成
 - OpenAI Embeddings
   - 用于知识库文档向量化，构建本地 RAG 检索能力
+- LangChain（`langchain-openai`、`langchain-community`）
+  - 知识 Agent 使用 LCEL（LangChain Expression Language）链式调用：`ChatPromptTemplate | ChatOpenAI | StrOutputParser`
+  - RAG 使用 `MarkdownHeaderTextSplitter` + `RecursiveCharacterTextSplitter` + `Chroma` 向量库封装
 
 ### 数据层
 
@@ -111,10 +114,11 @@
 
 设计重点：
 
-- 明确允许调用的工具集合
-- 要求把“数据事实”和“分析判断”分开输出
+- 明确允许调用的工具集合（5 个）：`get_stock_price`、`get_price_history`、`get_technical_indicators`、`get_financial_statements`、`search_news`
+- 要求把”数据事实”和”分析判断”分开输出（`## DATA` / `## ANALYSIS` 格式）
 - 限制模型在缺少数据时胡乱推断
 - 让模型优先基于工具结果组织答案，而不是脱离结果自由发挥
+- 支持 `parallel_tool_calls`，多个工具可并行执行
 
 这样可以降低金融问答中最常见的问题：把模型印象当成实时市场数据。
 
@@ -127,8 +131,9 @@
 - 明确要求 grounded answer
 - 没有命中的信息时拒绝编造
 - 保留来源信息，方便前端展示 `sources`
+- 通过 LangChain LCEL（`ChatPromptTemplate | ChatOpenAI | StrOutputParser`）构建推理链
 
-这类 Prompt 的核心不是“写得更聪明”，而是把可回答范围收窄，确保知识型问答可解释。
+这类 Prompt 的核心不是”写得更聪明”，而是把可回答范围收窄，确保知识型问答可解释。
 
 ## 数据来源说明
 
@@ -153,7 +158,7 @@
 
 ### 2. 知识数据来源
 
-知识问答的数据来自本地 Markdown 文档，路径为 [`backend/knowledge_base`](/Users/cassius/Desktop/my-fin-agent/backend/knowledge_base)。
+知识问答的数据来自本地 Markdown 文档，路径为 [`backend/knowledge_base`](./backend/knowledge_base)。
 
 当前包括中英文主题文档，例如：
 
@@ -165,14 +170,16 @@
 
 这些文档会在后端启动时自动进行：
 
-1. 文本切块
-2. 向量化
-3. 写入 ChromaDB
-4. 查询时相似度检索
+1. SHA-256 manifest 变更检测（无变更则跳过重建）
+2. LangChain `MarkdownHeaderTextSplitter` 按标题结构切块
+3. `RecursiveCharacterTextSplitter` 二次切块，chunk_size ≈ 2000 字符（~500 tokens），overlap ≈ 200 字符
+4. LangChain `OpenAIEmbeddings` 向量化并写入 ChromaDB（支持确定性 ID upsert）
+5. 查询时相似度检索，cosine distance > 0.7 的低相关 chunk 自动过滤
+6. 支持语言元数据过滤（中文问题优先检索 `_zh.md` 文档）
 
 ### 3. 配置数据来源
 
-环境变量定义在 [`backend/.env.example`](/Users/cassius/Desktop/my-fin-agent/backend/.env.example) 中，核心包括：
+环境变量定义在 [`backend/.env.example`](./backend/.env.example) 中，核心包括：
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
