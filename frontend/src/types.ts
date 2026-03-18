@@ -17,6 +17,7 @@ export interface QueryResponse {
   query_type: QueryType;
   ticker: string | null;
   latency_ms: number | null;
+  source_type?: string | null;
 }
 
 export interface ApiError {
@@ -35,6 +36,7 @@ export interface Message {
   sources?: string[];
   ticker?: string | null;
   latency_ms?: number | null;
+  source_type?: string | null;
   timestamp: Date;
   error?: boolean;
 }

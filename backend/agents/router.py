@@ -1,16 +1,24 @@
+"""LLM agent router: classifies queries and dispatches to market or knowledge handlers.
+
+Uses OpenAI with structured tool use for market data retrieval, and a RAG
+pipeline (local knowledge base + Wikipedia fallback) for knowledge queries.
 """
-LLM agent router: classifies queries and dispatches to market or knowledge handlers.
-Uses OpenAI with structured tool use for market data.
-"""
+
+from __future__ import annotations
 
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 from openai import OpenAI
 
-from .prompts import KNOWLEDGE_AGENT_PROMPT, MARKET_AGENT_PROMPT, ROUTER_PROMPT
+from .prompts import (
+    KNOWLEDGE_AGENT_PROMPT,
+    KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT,
+    MARKET_AGENT_PROMPT,
+    ROUTER_PROMPT,
+)
 from config import get_settings
 from market.news_client import format_news_for_context, search_news
 from market.yfinance_client import (
@@ -20,6 +28,11 @@ from market.yfinance_client import (
     get_technical_indicators,
 )
 from rag.pipeline import search_knowledge
+from rag.wikipedia_client import (
+    get_term_extraction_prompt,
+    parse_extracted_terms,
+    search_wikipedia,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +319,7 @@ def _run_market_agent(query: str, ticker: str, client: OpenAI) -> dict:
     }
 
 
-def _parse_market_response(text: str, ticker: Optional[str]) -> dict:
+def _parse_market_response(text: str, ticker: str | None) -> dict:
     """Parse the market agent response into data and analysis sections."""
     data_section = None
     analysis_section = text.strip()
@@ -328,32 +341,93 @@ def _parse_market_response(text: str, ticker: Optional[str]) -> dict:
     }
 
 
+_INSUFFICIENT_PHRASES = [
+    "does not contain sufficient information",
+    "does not contain information relevant",
+    "知识库中没有",
+    "没有足够的信息",
+    "无法从提供的",
+    "no relevant information",
+    "not contain enough information",
+]
+
+
+def _answer_is_insufficient(answer: str) -> bool:
+    """Check if the LLM's answer indicates the context was insufficient."""
+    answer_lower = answer.lower()
+    return any(phrase.lower() in answer_lower for phrase in _INSUFFICIENT_PHRASES)
+
+
 def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
-    """Run the knowledge base agent using retrieved context."""
+    """Run the knowledge base agent using retrieved context, with Wikipedia fallback."""
     preferred_language = "zh" if re.search(r"[\u4e00-\u9fff]", query) else None
     results = search_knowledge(query, n_results=5, preferred_language=preferred_language)
 
-    if not results:
-        answer = "The knowledge base does not contain information relevant to this query."
-        return {
-            "answer": answer,
-            "data_section": None,
-            "analysis_section": answer,
-            "query_type": "knowledge",
-            "ticker": None,
-            "sources": [],
-        }
+    if results:
+        # Local KB has relevant results — generate answer
+        local_answer = _generate_knowledge_answer(query, results, client, source_type="local_kb")
+        # Check if the LLM determined the context was insufficient
+        if not _answer_is_insufficient(local_answer.get("answer", "")):
+            return local_answer
+        logger.info("Local KB results were not relevant enough, falling back to Wikipedia")
 
+    else:
+        logger.info("Local KB returned no results, falling back to Wikipedia")
+
+    # Build LLM-powered term extraction function
+    def llm_extract(q: str) -> list[str]:
+        resp = _chat_completion(
+            client,
+            [
+                {"role": "system", "content": get_term_extraction_prompt()},
+                {"role": "user", "content": q},
+            ],
+            max_completion_tokens=256,
+        )
+        raw = _extract_text_content(resp.choices[0].message)
+        terms = parse_extracted_terms(raw)
+        logger.info(f"LLM extracted search terms: {terms}")
+        return terms
+
+    wiki_language = "zh" if preferred_language == "zh" else "en"
+    wiki_results = search_wikipedia(query, language=wiki_language, llm_extract_fn=llm_extract)
+
+    if wiki_results:
+        return _generate_knowledge_answer(query, wiki_results, client, source_type="wikipedia")
+
+    # Neither source had results
+    answer = "The knowledge base does not contain information relevant to this query."
+    return {
+        "answer": answer,
+        "data_section": None,
+        "analysis_section": answer,
+        "query_type": "knowledge",
+        "ticker": None,
+        "sources": [],
+        "source_type": "none",
+    }
+
+
+def _generate_knowledge_answer(
+    query: str,
+    results: list[dict],
+    client: OpenAI,
+    source_type: str,
+) -> dict:
+    """Generate an answer from knowledge results (local KB or Wikipedia)."""
     context_parts = []
     sources = set()
     for i, result in enumerate(results, 1):
         metadata = result.get("metadata", {}) or {}
         source = metadata.get("source_label") or metadata.get("source", "unknown")
-        sources.add(source)
+        url = metadata.get("url", "")
+        source_display = f"{source} ({url})" if url else source
+        sources.add(source_display)
         context_parts.append(f"--- Excerpt {i} (Source: {source}) ---\n{result['text']}")
 
     context = "\n\n".join(context_parts)
-    system_prompt = f"{KNOWLEDGE_AGENT_PROMPT}\n\n## Retrieved Context\n\n{context}"
+    prompt = KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT if source_type == "wikipedia" else KNOWLEDGE_AGENT_PROMPT
+    system_prompt = f"{prompt}\n\n## Retrieved Context\n\n{context}"
 
     response = _chat_completion(
         client,
@@ -372,6 +446,7 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
         "query_type": "knowledge",
         "ticker": None,
         "sources": sorted(list(sources)),
+        "source_type": source_type,
     }
 
 

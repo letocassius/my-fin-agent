@@ -1,18 +1,18 @@
-"""
-FastAPI application entry point for the Financial Asset Q&A System.
-"""
+"""FastAPI application entry point for the Financial Asset Q&A System."""
+
+from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI  # noqa: E402 — must load env before app imports
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from api.routes import router as api_router
+from api.routes import router as api_router  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

@@ -79,6 +79,7 @@ export function ChatInterface() {
           sources: response.sources,
           ticker: response.ticker,
           latency_ms: response.latency_ms ?? undefined,
+          source_type: response.source_type,
           timestamp: new Date(),
         };
 

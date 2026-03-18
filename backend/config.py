@@ -1,4 +1,8 @@
-"""Centralized application and provider configuration."""
+"""Centralized application and provider configuration.
+
+Exposes ``get_settings()`` (cached singleton) and ``get_provider_registry()``
+which lists every configured provider without leaking secrets.
+"""
 
 from __future__ import annotations
 

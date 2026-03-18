@@ -1,7 +1,10 @@
 """Finnhub client for news with summaries and basic financial metrics."""
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta, timezone
+
 from config import get_settings
 
 logger = logging.getLogger(__name__)

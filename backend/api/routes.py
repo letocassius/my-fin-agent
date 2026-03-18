@@ -1,10 +1,12 @@
 """API route handlers for the financial Q&A system."""
 
+from __future__ import annotations
+
 import logging
 import time
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
 
 from agents.router import route_query
 from config import get_provider_registry
@@ -20,12 +22,13 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    data_section: Optional[str] = None
+    data_section: str | None = None
     analysis_section: str
     sources: list[str] = []
     query_type: str  # "market" or "knowledge"
-    ticker: Optional[str] = None
-    latency_ms: Optional[float] = None
+    ticker: str | None = None
+    latency_ms: float | None = None
+    source_type: str | None = None  # "local_kb", "wikipedia", or "none"
 
 
 class HealthResponse(BaseModel):
@@ -39,10 +42,10 @@ class ProviderResponse(BaseModel):
     enabled: bool
     configured: bool
     required: bool
-    api_key_env: Optional[str] = None
-    base_url: Optional[str] = None
-    model: Optional[str] = None
-    notes: Optional[str] = None
+    api_key_env: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    notes: str | None = None
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -98,4 +101,5 @@ async def handle_query(request: QueryRequest):
         query_type=result.get("query_type", "knowledge"),
         ticker=result.get("ticker"),
         latency_ms=latency_ms,
+        source_type=result.get("source_type"),
     )

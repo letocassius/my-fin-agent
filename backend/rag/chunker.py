@@ -1,14 +1,15 @@
 """Text chunking utilities for the RAG pipeline."""
 
+from __future__ import annotations
+
 import re
-from typing import Optional
 
 
 def chunk_text(
     text: str,
     chunk_size: int = 500,
     overlap: int = 50,
-    source: Optional[str] = None,
+    source: str | None = None,
 ) -> list[dict]:
     """
     Split text into overlapping chunks for embedding.
@@ -93,7 +94,7 @@ def chunk_markdown(
     text: str,
     chunk_size: int = 500,
     overlap: int = 50,
-    source: Optional[str] = None,
+    source: str | None = None,
 ) -> list[dict]:
     """
     Chunk markdown text, preserving section structure.

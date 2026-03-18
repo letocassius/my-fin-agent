@@ -1,13 +1,16 @@
 """RAG pipeline: document ingestion and knowledge retrieval."""
 
-import os
-import logging
+from __future__ import annotations
+
 import hashlib
 import json
+import logging
+import os
 from pathlib import Path
+
 from .chunker import chunk_markdown
-from .embeddings import embed_text, embed_batch
-from .vector_store import add_documents, clear_collection, search, get_collection_count
+from .embeddings import embed_batch, embed_text
+from .vector_store import add_documents, clear_collection, get_collection_count, search
 
 logger = logging.getLogger(__name__)
 

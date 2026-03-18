@@ -1,8 +1,10 @@
 """ChromaDB vector store wrapper for the RAG pipeline."""
 
-import os
+from __future__ import annotations
+
 import logging
-from typing import Optional
+import os
+
 import chromadb
 from chromadb.config import Settings
 
@@ -75,7 +77,7 @@ def add_documents(
 def search(
     query_embedding: list[float],
     n_results: int = 5,
-    where: Optional[dict] = None,
+    where: dict | None = None,
 ) -> list[dict]:
     """
     Perform vector similarity search against the knowledge base.

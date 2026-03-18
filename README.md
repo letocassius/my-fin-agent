@@ -18,7 +18,7 @@
 │                      Frontend (React)                       │
 │  ChatInterface                                              │
 │  - 输入问题                                                  │
-│  - 渲染回答 / 数据卡片 / 错误状态                            │
+│  - 渲染 Markdown / LaTeX 回答、数据卡片、错误状态             │
 │  - 调用 POST /api/query                                     │
 └───────────────────────────────┬──────────────────────────────┘
                                 │ HTTP / JSON
@@ -37,74 +37,70 @@
                     market   │       │ knowledge
                              │       │
         ┌────────────────────▼─┐   ┌─▼────────────────────────┐
-        │ Market Agent         │   │ RAG Pipeline             │
-        │ OpenAI + tool calls  │   │ ChromaDB 相似度检索       │
-        │                      │   │ OpenAI 生成 grounded 回答 │
+        │ Market Agent         │   │ Knowledge Agent           │
+        │ OpenAI + tool calls  │   │ RAG: ChromaDB 相似度检索   │
+        │ 5 tools, parallel    │   │ Wikipedia 回退             │
+        │                      │   │ OpenAI 生成 grounded 回答  │
         └───────┬──────────────┘   └──────────┬───────────────┘
                 │                             │
      ┌──────────▼──────────┐         ┌────────▼───────────────┐
-     │ Market Data Sources │         │ Local Knowledge Base   │
-     │ - yfinance          │         │ backend/knowledge_base │
-     │ - Finnhub(optional) │         │ *.md / *_zh.md         │
-     └─────────────────────┘         └────────────────────────┘
+     │ Market Data Sources │         │ Knowledge Sources      │
+     │ - yfinance          │         │ - backend/knowledge_base│
+     │ - Finnhub (optional)│         │   *.md / *_zh.md       │
+     └─────────────────────┘         │ - Wikipedia (fallback) │
+                                     └────────────────────────┘
 ```
 
 ## 技术选型说明
 
 ### 前端
 
-- React 19 + TypeScript
-  - 适合构建聊天式单页应用，组件划分清晰，类型约束对接口联调更稳
-- Vite
-  - 本地开发启动快，适合这种前后端分离的小型项目
-- Tailwind CSS
-  - 当前 UI 是命令行风格聊天界面，Tailwind 更适合快速控制细粒度样式
+| 技术          | 选型理由                                                     |
+| ------------- | ------------------------------------------------------------ |
+| React 19      | 适合构建聊天式单页应用，组件划分清晰，类型约束对接口联调更稳 |
+| TypeScript    | 严格类型系统，前后端接口契约通过 `types.ts` ↔ Pydantic 对齐  |
+| Vite          | 本地开发启动快，适合前后端分离的小型项目                     |
+| Tailwind CSS  | 命令行风格聊天界面，Tailwind 更适合快速控制细粒度样式        |
+| react-markdown + KaTeX | Markdown 渲染与 LaTeX 公式支持，适合金融公式展示   |
 
 ### 后端
 
-- FastAPI
-  - 天然适合构建 JSON API，类型声明清晰，接口调试效率高
-- Pydantic
-  - 用于约束请求和响应结构，减少接口层面的隐式错误
-- Uvicorn
-  - 作为本地开发服务启动简单，和 FastAPI 配合自然
+| 技术     | 选型理由                                               |
+| -------- | ------------------------------------------------------ |
+| FastAPI  | 天然适合构建 JSON API，类型声明清晰，接口调试效率高    |
+| Pydantic | 用于约束请求和响应结构，减少接口层面的隐式错误         |
+| Uvicorn  | 作为本地开发服务启动简单，和 FastAPI 配合自然           |
 
 ### 模型与智能层
 
-- OpenAI Chat Completions
-  - 用于查询分类、市场问答生成、知识问答生成
-- OpenAI Embeddings
-  - 用于知识库文档向量化，构建本地 RAG 检索能力
-- LangChain（`langchain-openai`、`langchain-community`）
-  - 知识 Agent 使用 LCEL（LangChain Expression Language）链式调用：`ChatPromptTemplate | ChatOpenAI | StrOutputParser`
-  - RAG 使用 `MarkdownHeaderTextSplitter` + `RecursiveCharacterTextSplitter` + `Chroma` 向量库封装
+| 技术                    | 用途                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| OpenAI Chat Completions | 查询分类 (Router)、市场问答生成、知识问答生成        |
+| OpenAI Embeddings       | 知识库文档向量化，构建本地 RAG 检索能力              |
+| OpenAI Tool Use         | Market Agent 的 5 个工具通过 `tool_calls` 并行调用   |
 
 ### 数据层
 
-- yfinance
-  - 无需 API key，适合快速提供价格、历史走势、基础财务字段等数据
-- Finnhub
-  - 作为可选增强数据源，用于补充更丰富的新闻与基础财务数据
-- ChromaDB
-  - 本地持久化向量库，适合当前单机演示和开发场景
+| 技术     | 选型理由                                                     |
+| -------- | ------------------------------------------------------------ |
+| yfinance | 无需 API key，适合快速提供价格、历史走势、基础财务字段等数据 |
+| Finnhub  | 可选增强数据源，补充更丰富的新闻摘要与基础财务数据           |
+| ChromaDB | 本地持久化向量库，适合当前单机演示和开发场景                 |
 
 ## Prompt 设计思路
 
-系统中核心 Prompt 分为三类。
+系统中核心 Prompt 分为三类，均定义在 [`backend/agents/prompts.py`](./backend/agents/prompts.py)。
 
 ### 1. Router Prompt
 
-目标是把用户问题稳定分类为：
-
-- `market`
-- `knowledge`
+目标是把用户问题稳定分类为 `market` 或 `knowledge`。
 
 设计重点：
 
 - 强调意图分类优先于自由生成
 - 输出结构化 JSON，便于后端稳定解析
 - 抽取可能的 `ticker` 与 `period`
-- 对“公司走势/价格”和“概念解释类问题”做明确边界约束
+- 对"公司走势/价格"和"概念解释类问题"做明确边界约束
 
 这样做的原因是：路由是整个系统的第一道分流，如果分类不稳定，后续工具调用或 RAG 都会偏离。
 
@@ -115,7 +111,7 @@
 设计重点：
 
 - 明确允许调用的工具集合（5 个）：`get_stock_price`、`get_price_history`、`get_technical_indicators`、`get_financial_statements`、`search_news`
-- 要求把”数据事实”和”分析判断”分开输出（`## DATA` / `## ANALYSIS` 格式）
+- 要求把"数据事实"和"分析判断"分开输出（`## DATA` / `## ANALYSIS` 格式）
 - 限制模型在缺少数据时胡乱推断
 - 让模型优先基于工具结果组织答案，而不是脱离结果自由发挥
 - 支持 `parallel_tool_calls`，多个工具可并行执行
@@ -128,12 +124,12 @@
 
 设计重点：
 
-- 明确要求 grounded answer
-- 没有命中的信息时拒绝编造
+- 明确要求 grounded answer——模型只能引用检索到的上下文
+- 没有命中的信息时拒绝编造，输出标准拒答语
 - 保留来源信息，方便前端展示 `sources`
-- 通过 LangChain LCEL（`ChatPromptTemplate | ChatOpenAI | StrOutputParser`）构建推理链
+- Wikipedia 回退有独立 Prompt，允许更自由地组织 Wikipedia 内容但仍要求注明来源
 
-这类 Prompt 的核心不是”写得更聪明”，而是把可回答范围收窄，确保知识型问答可解释。
+这类 Prompt 的核心不是"写得更聪明"，而是把可回答范围收窄，确保知识型问答可解释。
 
 ## 数据来源说明
 
@@ -141,62 +137,62 @@
 
 主数据源是 `yfinance`：
 
-- 当前价格
-- 涨跌幅
-- 成交量
-- 市值
+- 当前价格、涨跌幅、成交量、市值
 - 历史 K 线 / OHLCV
-- 部分基础财务字段
+- 技术指标（SMA、RSI、MACD、Bollinger Bands）
+- 基础财务报表（收入、资产负债表、现金流）
 
 可选增强数据源是 `Finnhub`：
 
-- 公司新闻
-- 基础财务指标
-- EPS 等补充字段
+- 带摘要的公司新闻（精确到分钟的时间戳）
+- 基础财务指标和 EPS 历史
 
-当前实现里，`Finnhub` 不是必需项，未配置 API key 时系统仍可运行。
+当前实现里，`Finnhub` 不是必需项，未配置 API key 时系统自动降级到 yfinance 新闻。
 
 ### 2. 知识数据来源
 
 知识问答的数据来自本地 Markdown 文档，路径为 [`backend/knowledge_base`](./backend/knowledge_base)。
 
-当前包括中英文主题文档，例如：
+当前包括中英文主题文档：
 
-- `financial_basics.md`
-- `technical_analysis.md`
-- `earnings_reports.md`
-- `market_concepts.md`
-- 对应的 `_zh.md` 中文版本
+- `financial_basics.md` / `financial_basics_zh.md`
+- `technical_analysis.md` / `technical_analysis_zh.md`
+- `earnings_reports.md` / `earnings_reports_zh.md`
+- `market_concepts.md` / `market_concepts_zh.md`
 
 这些文档会在后端启动时自动进行：
 
 1. SHA-256 manifest 变更检测（无变更则跳过重建）
-2. LangChain `MarkdownHeaderTextSplitter` 按标题结构切块
-3. `RecursiveCharacterTextSplitter` 二次切块，chunk_size ≈ 2000 字符（~500 tokens），overlap ≈ 200 字符
-4. LangChain `OpenAIEmbeddings` 向量化并写入 ChromaDB（支持确定性 ID upsert）
-5. 查询时相似度检索，cosine distance > 0.7 的低相关 chunk 自动过滤
+2. Markdown header-aware 分块（按 `#` / `##` / `###` 分段，保留标题上下文）
+3. 句子边界分块，chunk_size ≈ 500 tokens（约 2000 字符），overlap ≈ 50 tokens
+4. OpenAI `text-embedding-3-small` 向量化并写入 ChromaDB（确定性 ID 支持 upsert）
+5. 查询时 cosine 相似度检索，distance > 0.7 的低相关 chunk 自动过滤
 6. 支持语言元数据过滤（中文问题优先检索 `_zh.md` 文档）
+
+**Wikipedia 回退**：当本地知识库无法覆盖用户问题时，系统通过 LLM 提取搜索关键词，调用 Wikipedia API 检索相关文章，作为 RAG 上下文生成回答。
 
 ### 3. 配置数据来源
 
 环境变量定义在 [`backend/.env.example`](./backend/.env.example) 中，核心包括：
 
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `EMBEDDING_MODEL`
-- `FINNHUB_API_KEY`
-- `ALPHA_VANTAGE_API_KEY`
-
-其中 `ALPHA_VANTAGE_API_KEY` 目前保留为扩展位，尚未成为主流程的一部分。
+| 变量                    | 必需 | 说明                              |
+| ----------------------- | ---- | --------------------------------- |
+| `OPENAI_API_KEY`        | 是   | 查询路由、答案生成、向量化        |
+| `OPENAI_MODEL`          | 否   | 默认 `gpt-5.1`                   |
+| `EMBEDDING_MODEL`       | 否   | 默认 `text-embedding-3-small`     |
+| `FINNHUB_API_KEY`       | 否   | 启用 Finnhub 增强新闻与财务数据   |
+| `ALPHA_VANTAGE_API_KEY` | 否   | 保留扩展位，尚未接入主流程        |
 
 ## 接口说明
 
 后端主要接口：
 
-- `GET /`
-- `GET /api/health`
-- `GET /api/providers`
-- `POST /api/query`
+| 方法   | 路径              | 说明                              |
+| ------ | ----------------- | --------------------------------- |
+| `GET`  | `/`               | 服务信息                          |
+| `GET`  | `/api/health`     | 健康检查                          |
+| `GET`  | `/api/providers`  | 已配置的数据源列表（不暴露密钥）  |
+| `POST` | `/api/query`      | 主查询接口                        |
 
 示例请求：
 
@@ -214,7 +210,8 @@
   "sources": ["Yahoo Finance (yfinance)"],
   "query_type": "market",
   "ticker": "TSLA",
-  "latency_ms": 2140.8
+  "latency_ms": 2140.8,
+  "source_type": null
 }
 ```
 
@@ -228,13 +225,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
+# 编辑 .env 填入 OPENAI_API_KEY
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
-
-至少需要配置：
-
-```bash
-OPENAI_API_KEY=your_key_here
 ```
 
 ### Frontend
@@ -291,16 +283,16 @@ VITE_API_URL=http://127.0.0.1:8000
 
 当前知识库规模较小，本地 ChromaDB 足够；如果知识库继续扩展，可考虑：
 
-- 更细粒度 chunk 策略
-- reranking 提升召回质量
-- 文档级元数据过滤，例如按语言、主题、版本过滤
+- 更细粒度 chunk 策略（按段落或语义分块）
+- 引入 reranking 模型提升召回质量
+- 文档级元数据过滤，例如按主题、版本过滤
 - 引入增量更新机制，而不是仅靠全量重建
 
 ### 4. 前端交互优化
 
 目前前端已经支持基本聊天流，但仍可继续增强：
 
-- 支持流式输出
+- 支持流式输出（SSE / WebSocket）
 - 支持历史会话持久化
 - 支持图表展示历史价格和技术指标
 - 对 market / knowledge 两类回答做更明确的可视化分区
@@ -309,7 +301,7 @@ VITE_API_URL=http://127.0.0.1:8000
 
 当前项目适合本地开发。若走向稳定部署，可继续补齐：
 
-- Docker 化
+- Docker 化（前后端分离镜像 + docker-compose）
 - CI 测试与 lint 流程
 - 更完整的异常监控与日志采集
 - API 鉴权与限流

@@ -42,3 +42,32 @@
     background: #484f58;
   }
 }
+
+/* KaTeX overrides — prevent extra scrollbars */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+  margin: 0.5rem 0;
+}
+
+.katex-display > .katex {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.katex-html {
+  overflow: visible;
+}
+
+/* Markdown content — contain overflow within message bubble */
+.markdown-content {
+  overflow: hidden;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.markdown-content pre,
+.markdown-content table {
+  overflow-x: auto;
+}

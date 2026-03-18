@@ -10,92 +10,44 @@
 
 import type { Message } from "../types";
 import { MarketDataCard } from "./MarketDataCard";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface MessageBubbleProps {
   message: Message;
 }
 
-function QueryTypeBadge({ queryType }: { queryType: "market" | "knowledge" }) {
+function QueryTypeBadge({ queryType, sourceType }: { queryType: "market" | "knowledge"; sourceType?: string | null }) {
   const isMarket = queryType === "market";
+  const isWikipedia = sourceType === "wikipedia";
+
+  let colorClasses: string;
+  let dotClasses: string;
+  let label: string;
+
+  if (isMarket) {
+    colorClasses = "bg-terminal-blue/10 text-terminal-blue border-terminal-blue/30";
+    dotClasses = "bg-terminal-blue";
+    label = "Market Data";
+  } else if (isWikipedia) {
+    colorClasses = "bg-terminal-green/10 text-terminal-green border-terminal-green/30";
+    dotClasses = "bg-terminal-green";
+    label = "Wikipedia";
+  } else {
+    colorClasses = "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30";
+    dotClasses = "bg-terminal-purple";
+    label = "Knowledge Base";
+  }
+
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-widest border ${
-        isMarket
-          ? "bg-terminal-blue/10 text-terminal-blue border-terminal-blue/30"
-          : "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30"
-      }`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-widest border ${colorClasses}`}
     >
-      <span
-        className={`w-1.5 h-1.5 rounded-full ${
-          isMarket ? "bg-terminal-blue" : "bg-terminal-purple"
-        }`}
-      />
-      {isMarket ? "Market Data" : "Knowledge Base"}
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+      {label}
     </span>
   );
 }
 
-function AnalysisSection({ content }: { content: string }) {
-  // Render markdown-like formatting (headers, bold)
-  const lines = content.split("\n");
-  return (
-    <div className="text-sm text-terminal-text leading-relaxed space-y-1.5">
-      {lines.map((line, i) => {
-        if (line.startsWith("## ")) {
-          return (
-            <h3 key={i} className="font-semibold text-terminal-text text-sm mt-3 mb-1">
-              {line.replace(/^## /, "")}
-            </h3>
-          );
-        }
-        if (line.startsWith("# ")) {
-          return (
-            <h2 key={i} className="font-bold text-terminal-text text-base mt-3 mb-1">
-              {line.replace(/^# /, "")}
-            </h2>
-          );
-        }
-        if (line.startsWith("**") && line.endsWith("**")) {
-          return (
-            <p key={i} className="font-semibold text-terminal-text">
-              {line.replace(/^\*\*|\*\*$/g, "")}
-            </p>
-          );
-        }
-        if (line.startsWith("- ") || line.startsWith("* ")) {
-          return (
-            <div key={i} className="flex gap-2 ml-2">
-              <span className="text-terminal-muted mt-0.5">·</span>
-              <span>{renderInlineMarkdown(line.replace(/^[-*]\s/, ""))}</span>
-            </div>
-          );
-        }
-        if (line.trim() === "") {
-          return <div key={i} className="h-1" />;
-        }
-        return (
-          <p key={i} className="text-terminal-text">
-            {renderInlineMarkdown(line)}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-function renderInlineMarkdown(text: string): React.ReactNode {
-  // Handle **bold** and *italic* inline
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={i} className="font-semibold text-terminal-text">{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith("*") && part.endsWith("*")) {
-      return <em key={i} className="italic">{part.slice(1, -1)}</em>;
-    }
-    return <span key={i}>{part}</span>;
-  });
-}
 
 function SourcesList({ sources }: { sources: string[] }) {
   if (!sources || sources.length === 0) return null;
@@ -155,7 +107,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* Header row: type badge + latency */}
         <div className="flex items-center gap-2 mb-2">
           {message.query_type && !message.error && (
-            <QueryTypeBadge queryType={message.query_type} />
+            <QueryTypeBadge queryType={message.query_type} sourceType={message.source_type} />
           )}
           {message.latency_ms !== undefined && message.latency_ms !== null && (
             <LatencyBadge ms={message.latency_ms} />
@@ -181,7 +133,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 <div className="text-[10px] font-mono text-terminal-muted uppercase tracking-widest mb-1.5">
                   Analysis
                 </div>
-                <AnalysisSection content={message.analysis_section} />
+                <MarkdownRenderer content={message.analysis_section} />
               </div>
             )}
 
@@ -196,7 +148,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <div className="space-y-2">
             {/* Knowledge answer in prose */}
             <div className="px-1">
-              <AnalysisSection content={message.content} />
+              <MarkdownRenderer content={message.content} />
             </div>
 
             {/* Sources */}

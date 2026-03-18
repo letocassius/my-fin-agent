@@ -1,8 +1,11 @@
-"""News retrieval client using yfinance and web search fallback."""
+"""News retrieval client using yfinance with optional Finnhub fallback."""
 
-import yfinance as yf
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
+
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 

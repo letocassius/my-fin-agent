@@ -1,9 +1,15 @@
-"""Yahoo Finance client for market data retrieval."""
+"""Yahoo Finance client for market data retrieval.
 
-import yfinance as yf
-import pandas as pd
-from typing import Optional
+Provides helpers for current price, OHLCV history, technical indicators,
+financial statements, and trend classification — all backed by ``yfinance``.
+"""
+
+from __future__ import annotations
+
 import logging
+
+import pandas as pd
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
