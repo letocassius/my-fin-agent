@@ -1,0 +1,29 @@
+.env
+*.env
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+backend/.venv/
+
+# Runtime / local state
+.run/
+*.log
+backend/.chroma_db/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/

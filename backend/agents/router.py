@@ -1,0 +1,396 @@
+"""
+LLM agent router: classifies queries and dispatches to market or knowledge handlers.
+Uses OpenAI with structured tool use for market data.
+"""
+
+import json
+import logging
+import re
+from typing import Any, Optional
+
+from openai import OpenAI
+
+from .prompts import KNOWLEDGE_AGENT_PROMPT, MARKET_AGENT_PROMPT, ROUTER_PROMPT
+from config import get_settings
+from market.news_client import format_news_for_context, search_news
+from market.yfinance_client import (
+    get_current_price,
+    get_financial_statements,
+    get_price_history,
+    get_technical_indicators,
+)
+from rag.pipeline import search_knowledge
+
+logger = logging.getLogger(__name__)
+
+MARKET_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_price",
+            "description": (
+                "Fetches current price and key statistics for a stock ticker symbol. "
+                "Returns price, change, change_pct, volume, market_cap, PE ratio, and more."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol (e.g., AAPL, BABA, TSLA)",
+                    }
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_price_history",
+            "description": (
+                "Fetches historical OHLCV price data for a stock ticker. "
+                "Returns period change, trend classification (uptrend/downtrend/sideways), and data points."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol",
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": (
+                            "Time period for history. Options: '1d', '5d', '1mo', '3mo', '6mo', "
+                            "'1y', '2y', '5y', 'ytd'. Default: '1mo'."
+                        ),
+                        "default": "1mo",
+                    },
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_news",
+            "description": (
+                "Searches for recent news articles related to a stock ticker. "
+                "Useful for understanding price movements, catalysts, and market sentiment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query to refine news results",
+                    },
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_technical_indicators",
+            "description": (
+                "SMA-20/50, RSI-14, MACD (12/26/9), Bollinger Bands (20, 2σ). "
+                "Each indicator includes a signal interpretation. "
+                "Use for overbought/oversold, trend momentum, mean-reversion signals."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol",
+                    }
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_financial_statements",
+            "description": (
+                "Annual or quarterly income statement, balance sheet, cash flow. "
+                "Use for revenue trends, debt levels, free cash flow, EPS history. "
+                "Set quarterly=true for recent quarters."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock ticker symbol",
+                    },
+                    "quarterly": {
+                        "type": "boolean",
+                        "description": "If true, returns quarterly data instead of annual",
+                        "default": False,
+                    },
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+]
+
+
+def _get_openai_client() -> OpenAI:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is not set")
+    return OpenAI(api_key=settings.openai_api_key)
+
+
+def _chat_completion(
+    client: OpenAI,
+    messages: list[dict[str, Any]],
+    *,
+    response_format: dict[str, str] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    max_completion_tokens: int = 2048,
+) -> Any:
+    kwargs: dict[str, Any] = {
+        "model": get_settings().openai_model,
+        "messages": messages,
+        "max_completion_tokens": max_completion_tokens,
+    }
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    if tools is not None:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+        kwargs["parallel_tool_calls"] = True
+    return client.chat.completions.create(**kwargs)
+
+
+def _extract_text_content(message: Any) -> str:
+    content = message.content
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            text_value = getattr(item, "text", None)
+            if text_value:
+                text_parts.append(text_value)
+        return "\n".join(text_parts).strip()
+    return ""
+
+
+def _classify_query(query: str, client: OpenAI) -> dict:
+    """Use OpenAI to classify the query as market or knowledge."""
+    response = _chat_completion(
+        client,
+        [
+            {"role": "system", "content": ROUTER_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        response_format={"type": "json_object"},
+        max_completion_tokens=512,
+    )
+
+    content = _extract_text_content(response.choices[0].message)
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        logger.warning(f"Router returned non-JSON: {content}")
+        query_lower = query.lower()
+        market_keywords = ["price", "stock", "ticker", "performance", "trend", "surge", "drop", "rally", "fell", "$"]
+        is_market = any(kw in query_lower for kw in market_keywords)
+        return {
+            "query_type": "market" if is_market else "knowledge",
+            "ticker": None,
+            "period": "1mo",
+            "reasoning": "Fallback classification",
+        }
+
+
+def _execute_tool_call(tool_name: str, tool_input: dict) -> str:
+    """Execute a tool call and return the result as a JSON string."""
+    try:
+        if tool_name == "get_stock_price":
+            result = get_current_price(tool_input["ticker"])
+        elif tool_name == "get_price_history":
+            result = get_price_history(tool_input["ticker"], tool_input.get("period", "1mo"))
+            if "data" in result and isinstance(result["data"], list):
+                data = result["data"]
+                if len(data) > 10:
+                    result["data_sample"] = data[:3] + [{"...": f"({len(data) - 6} more data points)"}] + data[-3:]
+                    del result["data"]
+                else:
+                    result["data_sample"] = data
+                    del result["data"]
+        elif tool_name == "search_news":
+            articles = search_news(query=tool_input.get("query", ""), ticker=tool_input.get("ticker"))
+            result = {
+                "ticker": tool_input.get("ticker"),
+                "article_count": len(articles),
+                "articles": articles[:8],
+                "formatted": format_news_for_context(articles[:8]),
+            }
+        elif tool_name == "get_technical_indicators":
+            result = get_technical_indicators(tool_input["ticker"])
+        elif tool_name == "get_financial_statements":
+            result = get_financial_statements(
+                tool_input["ticker"],
+                quarterly=tool_input.get("quarterly", False),
+            )
+            for stmt_key in ("income_statement", "balance_sheet", "cash_flow"):
+                if stmt_key in result and isinstance(result[stmt_key], dict):
+                    for metric in result[stmt_key]:
+                        if isinstance(result[stmt_key][metric], dict) and len(result[stmt_key][metric]) > 4:
+                            result[stmt_key][metric] = dict(list(result[stmt_key][metric].items())[:4])
+        else:
+            result = {"error": f"Unknown tool: {tool_name}"}
+
+        return json.dumps(result, default=str)
+    except Exception as e:
+        logger.exception(f"Tool execution error ({tool_name}): {e}")
+        return json.dumps({"error": str(e)})
+
+
+def _run_market_agent(query: str, ticker: str, client: OpenAI) -> dict:
+    """Run the market data agent with OpenAI tool use."""
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": MARKET_AGENT_PROMPT},
+        {"role": "user", "content": query},
+    ]
+
+    for _ in range(5):
+        response = _chat_completion(client, messages, tools=MARKET_TOOLS, max_completion_tokens=2048)
+        message = response.choices[0].message
+        tool_calls = message.tool_calls or []
+
+        if not tool_calls:
+            return _parse_market_response(_extract_text_content(message), ticker)
+
+        messages.append(message.model_dump(exclude_none=True))
+
+        for tool_call in tool_calls:
+            arguments = tool_call.function.arguments or "{}"
+            try:
+                tool_input = json.loads(arguments)
+            except json.JSONDecodeError:
+                tool_input = {}
+            logger.info(f"Tool call: {tool_call.function.name}({tool_input})")
+            result_str = _execute_tool_call(tool_call.function.name, tool_input)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result_str,
+                }
+            )
+
+    fallback = "Unable to complete market analysis after multiple tool rounds."
+    return {
+        "answer": fallback,
+        "data_section": None,
+        "analysis_section": fallback,
+        "query_type": "market",
+        "ticker": ticker,
+        "sources": ["Yahoo Finance (yfinance)"],
+    }
+
+
+def _parse_market_response(text: str, ticker: Optional[str]) -> dict:
+    """Parse the market agent response into data and analysis sections."""
+    data_section = None
+    analysis_section = text.strip()
+
+    if "## DATA" in text and "## ANALYSIS" in text:
+        parts = text.split("## ANALYSIS", 1)
+        analysis_section = parts[1].strip() if len(parts) > 1 else text
+
+        data_parts = parts[0].split("## DATA", 1)
+        data_section = data_parts[1].strip() if len(data_parts) > 1 else None
+
+    return {
+        "answer": text.strip(),
+        "data_section": data_section,
+        "analysis_section": analysis_section,
+        "query_type": "market",
+        "ticker": ticker,
+        "sources": ["Yahoo Finance (yfinance)"] + (["Finnhub"] if "finnhub" in text.lower() or "Summary:" in text else []),
+    }
+
+
+def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
+    """Run the knowledge base agent using retrieved context."""
+    preferred_language = "zh" if re.search(r"[\u4e00-\u9fff]", query) else None
+    results = search_knowledge(query, n_results=5, preferred_language=preferred_language)
+
+    if not results:
+        answer = "The knowledge base does not contain information relevant to this query."
+        return {
+            "answer": answer,
+            "data_section": None,
+            "analysis_section": answer,
+            "query_type": "knowledge",
+            "ticker": None,
+            "sources": [],
+        }
+
+    context_parts = []
+    sources = set()
+    for i, result in enumerate(results, 1):
+        metadata = result.get("metadata", {}) or {}
+        source = metadata.get("source_label") or metadata.get("source", "unknown")
+        sources.add(source)
+        context_parts.append(f"--- Excerpt {i} (Source: {source}) ---\n{result['text']}")
+
+    context = "\n\n".join(context_parts)
+    system_prompt = f"{KNOWLEDGE_AGENT_PROMPT}\n\n## Retrieved Context\n\n{context}"
+
+    response = _chat_completion(
+        client,
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query},
+        ],
+        max_completion_tokens=2048,
+    )
+    answer = _extract_text_content(response.choices[0].message)
+
+    return {
+        "answer": answer,
+        "data_section": None,
+        "analysis_section": answer,
+        "query_type": "knowledge",
+        "ticker": None,
+        "sources": sorted(list(sources)),
+    }
+
+
+def route_query(query: str) -> dict:
+    """Classify a query and route it to the appropriate agent."""
+    client = _get_openai_client()
+
+    logger.info(f"Routing query: {query!r}")
+    classification = _classify_query(query, client)
+    query_type = classification.get("query_type", "knowledge")
+    ticker = classification.get("ticker")
+
+    logger.info(
+        f"Classification: type={query_type}, ticker={ticker}, period={classification.get('period', '1mo')}"
+    )
+    logger.info(f"Routing reasoning: {classification.get('reasoning', '')}")
+
+    if query_type == "market":
+        if not ticker:
+            return _run_knowledge_agent(query, client)
+        return _run_market_agent(query, ticker, client)
+    return _run_knowledge_agent(query, client)
