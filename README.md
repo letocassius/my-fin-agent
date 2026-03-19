@@ -2,6 +2,10 @@
 
 一个基于 OpenAI、FastAPI、React 和本地 RAG 的金融问答系统，支持股票行情类问题与金融知识类问题的统一入口查询。
 
+
+https://github.com/user-attachments/assets/b4412dcb-2ad4-4d60-8c03-f2d57e5fc35e
+
+
 ## 项目概述
 
 系统目标是把两类常见金融问答能力放在一个轻量全栈应用中：
