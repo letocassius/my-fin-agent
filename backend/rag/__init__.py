@@ -1,1 +1,1 @@
-# RAG pipeline
+# External knowledge retrieval helpers

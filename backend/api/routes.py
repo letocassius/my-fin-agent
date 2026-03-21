@@ -28,7 +28,7 @@ class QueryResponse(BaseModel):
     query_type: str  # "market" or "knowledge"
     ticker: str | None = None
     latency_ms: float | None = None
-    source_type: str | None = None  # "local_kb", "wikipedia", or "none"
+    source_type: str | None = None  # "wikipedia" or "none"
 
 
 class HealthResponse(BaseModel):
@@ -71,7 +71,7 @@ async def handle_query(request: QueryRequest):
 
     The backend classifies the query as either:
     - market: Fetches live data from yfinance and formats a structured response
-    - knowledge: Retrieves relevant chunks from the knowledge base and generates a grounded answer
+    - knowledge: Retrieves external reference material and generates a grounded answer
     """
     start = time.monotonic()
 

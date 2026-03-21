@@ -2,14 +2,14 @@
 
 Contains the router prompt (query classification), market agent prompt
 (structured tool-use for live data), and knowledge agent prompts
-(local KB and Wikipedia fallback).
+for externally retrieved reference material.
 """
 
 ROUTER_PROMPT = """You are a financial query classifier for a professional financial Q&A system.
 
 Your task is to classify a user's query into one of two categories:
 1. "market" - Questions about specific asset prices, performance, trends, or news (requires live market data)
-2. "knowledge" - Conceptual financial questions that can be answered from a knowledge base
+2. "knowledge" - Conceptual financial questions that should be answered from external reference material
 
 MARKET queries include:
 - Current or historical stock/crypto/ETF prices
@@ -96,7 +96,7 @@ KNOWLEDGE_AGENT_PROMPT = """You are a financial knowledge assistant. You answer 
 
 INSTRUCTIONS:
 1. Answer ONLY using the information in the provided context chunks
-2. If the context does not contain enough information to answer the question, say: "The knowledge base does not contain sufficient information on this topic."
+2. If the context does not contain enough information to answer the question, say: "The provided reference material does not contain sufficient information on this topic."
 3. Do NOT draw on general knowledge outside the provided context
 4. Cite the source document(s) you are drawing from
 5. Be precise and educational in your explanations
@@ -109,7 +109,7 @@ Provide a clear, well-structured answer based on the retrieved context. Start di
 At the end, include:
 **Sources:** [list the source documents used]
 
-The context provided below contains relevant excerpts from the financial knowledge base. Use only this material."""
+The context provided below contains relevant excerpts from external reference material. Use only this material."""
 
 
 KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT = """You are a financial knowledge assistant. You answer conceptual financial questions using information retrieved from Wikipedia.

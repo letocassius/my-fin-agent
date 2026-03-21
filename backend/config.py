@@ -10,6 +10,21 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
+def _parse_allowed_origins(raw_value: str | None) -> tuple[str, ...]:
+    if raw_value is None:
+        return DEFAULT_ALLOWED_ORIGINS
+
+    origins = tuple(origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip())
+    return origins or DEFAULT_ALLOWED_ORIGINS
+
 
 @dataclass(frozen=True)
 class ProviderStatus:
@@ -27,9 +42,9 @@ class ProviderStatus:
 class Settings:
     openai_api_key: str | None
     openai_model: str
-    embedding_model: str
     finnhub_api_key: str | None
     alpha_vantage_api_key: str | None
+    allowed_origins: tuple[str, ...]
 
     @property
     def provider_statuses(self) -> list[ProviderStatus]:
@@ -42,15 +57,6 @@ class Settings:
                 api_key_env="OPENAI_API_KEY",
                 model=self.openai_model,
                 notes="Used for query routing and answer generation.",
-            ),
-            ProviderStatus(
-                name="openai_embeddings",
-                enabled=bool(self.openai_api_key),
-                configured=bool(self.openai_api_key),
-                required=True,
-                api_key_env="OPENAI_API_KEY",
-                model=self.embedding_model,
-                notes="Used for RAG embeddings and ingestion.",
             ),
             ProviderStatus(
                 name="yfinance",
@@ -82,10 +88,10 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.1"),
-        embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
         finnhub_api_key=os.getenv("FINNHUB_API_KEY") or None,
         alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY") or None,
+        allowed_origins=_parse_allowed_origins(os.getenv("ALLOWED_ORIGINS")),
     )
 
 

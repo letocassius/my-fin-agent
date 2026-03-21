@@ -1,210 +1,139 @@
 # my-fin-agent
 
-一个基于 OpenAI、FastAPI、React 和本地 RAG 的金融问答系统，支持股票行情类问题与金融知识类问题的统一入口查询。
+`my-fin-agent` is a lightweight full-stack financial Q&A application built with FastAPI, React, and OpenAI. It supports two kinds of questions through one chat interface:
 
+- Market questions: live price, trend, technical indicator, financial statement, and news queries for specific tickers
+- Knowledge questions: conceptual finance questions answered from externally retrieved reference material
 
-https://github.com/user-attachments/assets/b4412dcb-2ad4-4d60-8c03-f2d57e5fc35e
+The current knowledge path does not use ChromaDB or a local vector store. Knowledge answers are generated from externally retrieved sources, currently centered on Wikipedia.
 
-
-## 项目概述
-
-系统目标是把两类常见金融问答能力放在一个轻量全栈应用中：
-
-- 市场类问题：查询股票价格、走势、技术指标、财务报表、相关新闻
-- 知识类问题：基于本地知识库回答金融概念、技术分析、财报阅读等问题
-
-前端提供聊天式交互界面，后端负责意图路由、工具调用、RAG 检索与答案生成。
-
-## 系统架构图
+## Architecture
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                      Frontend (React)                       │
-│  ChatInterface                                              │
-│  - 输入问题                                                  │
-│  - 渲染 Markdown / LaTeX 回答、数据卡片、错误状态             │
-│  - 调用 POST /api/query                                     │
+│  - Chat interface                                           │
+│  - Markdown / LaTeX rendering                               │
+│  - Calls POST /api/query                                    │
 └───────────────────────────────┬──────────────────────────────┘
                                 │ HTTP / JSON
 ┌───────────────────────────────▼──────────────────────────────┐
 │                      Backend (FastAPI)                      │
-│  /api/query                                                 │
-│  /api/health                                                │
-│  /api/providers                                             │
+│  - /api/query                                               │
+│  - /api/health                                              │
+│  - /api/providers                                           │
 └───────────────────────────────┬──────────────────────────────┘
                                 │
                      ┌──────────▼──────────┐
                      │   Query Router      │
-                     │   OpenAI 分类意图    │
+                     │   OpenAI intent     │
                      └───────┬───────┬─────┘
                              │       │
                     market   │       │ knowledge
                              │       │
         ┌────────────────────▼─┐   ┌─▼────────────────────────┐
         │ Market Agent         │   │ Knowledge Agent           │
-        │ OpenAI + tool calls  │   │ RAG: ChromaDB 相似度检索   │
-        │ 5 tools, parallel    │   │ Wikipedia 回退             │
-        │                      │   │ OpenAI 生成 grounded 回答  │
+        │ OpenAI + tool calls  │   │ External retrieval        │
+        │ 5 tools, parallel    │   │ Wikipedia search          │
+        │                      │   │ OpenAI grounded answer    │
         └───────┬──────────────┘   └──────────┬───────────────┘
                 │                             │
      ┌──────────▼──────────┐         ┌────────▼───────────────┐
      │ Market Data Sources │         │ Knowledge Sources      │
-     │ - yfinance          │         │ - backend/knowledge_base│
-     │ - Finnhub (optional)│         │   *.md / *_zh.md       │
-     └─────────────────────┘         │ - Wikipedia (fallback) │
-                                     └────────────────────────┘
+     │ - yfinance          │         │ - Wikipedia            │
+     │ - Finnhub (optional)│         │ - Public web refs      │
+     └─────────────────────┘         └────────────────────────┘
 ```
 
-## 技术选型说明
+## Tech Stack
 
-### 前端
+### Frontend
 
-| 技术          | 选型理由                                                     |
-| ------------- | ------------------------------------------------------------ |
-| React 19      | 适合构建聊天式单页应用，组件划分清晰，类型约束对接口联调更稳 |
-| TypeScript    | 严格类型系统，前后端接口契约通过 `types.ts` ↔ Pydantic 对齐  |
-| Vite          | 本地开发启动快，适合前后端分离的小型项目                     |
-| Tailwind CSS  | 命令行风格聊天界面，Tailwind 更适合快速控制细粒度样式        |
-| react-markdown + KaTeX | Markdown 渲染与 LaTeX 公式支持，适合金融公式展示   |
+- React 19
+- TypeScript
+- Vite
+- Tailwind CSS
+- `react-markdown` + KaTeX
 
-### 后端
+### Backend
 
-| 技术     | 选型理由                                               |
-| -------- | ------------------------------------------------------ |
-| FastAPI  | 天然适合构建 JSON API，类型声明清晰，接口调试效率高    |
-| Pydantic | 用于约束请求和响应结构，减少接口层面的隐式错误         |
-| Uvicorn  | 作为本地开发服务启动简单，和 FastAPI 配合自然           |
+- FastAPI
+- Pydantic
+- Uvicorn
 
-### 模型与智能层
+### Intelligence Layer
 
-| 技术                    | 用途                                                 |
-| ----------------------- | ---------------------------------------------------- |
-| OpenAI Chat Completions | 查询分类 (Router)、市场问答生成、知识问答生成        |
-| OpenAI Embeddings       | 知识库文档向量化，构建本地 RAG 检索能力              |
-| OpenAI Tool Use         | Market Agent 的 5 个工具通过 `tool_calls` 并行调用   |
+- OpenAI chat completions for:
+  - query routing
+  - market response generation
+  - knowledge response generation
+- OpenAI tool use for market-data workflows
 
-### 数据层
+### Data Sources
 
-| 技术     | 选型理由                                                     |
-| -------- | ------------------------------------------------------------ |
-| yfinance | 无需 API key，适合快速提供价格、历史走势、基础财务字段等数据 |
-| Finnhub  | 可选增强数据源，补充更丰富的新闻摘要与基础财务数据           |
-| ChromaDB | 本地持久化向量库，适合当前单机演示和开发场景                 |
+- `yfinance` for core market data
+- `Finnhub` as an optional enrichment source
+- Wikipedia API for external knowledge retrieval
 
-## Prompt 设计思路
+## How It Works
 
-系统中核心 Prompt 分为三类，均定义在 [`backend/agents/prompts.py`](./backend/agents/prompts.py)。
+### Market Queries
 
-### 1. Router Prompt
+The router classifies a question as `market` when it asks for live or ticker-specific information such as:
 
-目标是把用户问题稳定分类为 `market` 或 `knowledge`。
+- current price
+- performance over a time range
+- technical indicators
+- financial statements
+- catalyst/news questions
 
-设计重点：
+The market agent can call:
 
-- 强调意图分类优先于自由生成
-- 输出结构化 JSON，便于后端稳定解析
-- 抽取可能的 `ticker` 与 `period`
-- 对"公司走势/价格"和"概念解释类问题"做明确边界约束
+- `get_stock_price`
+- `get_price_history`
+- `get_technical_indicators`
+- `get_financial_statements`
+- `search_news`
 
-这样做的原因是：路由是整个系统的第一道分流，如果分类不稳定，后续工具调用或 RAG 都会偏离。
+It returns a structured answer split into:
 
-### 2. Market Agent Prompt
+- `## DATA`
+- `## ANALYSIS`
 
-目标是让模型在市场类问题中主动调用工具，而不是仅凭参数记忆回答。
+### Knowledge Queries
 
-设计重点：
+The router classifies a question as `knowledge` when it is conceptual, such as:
 
-- 明确允许调用的工具集合（5 个）：`get_stock_price`、`get_price_history`、`get_technical_indicators`、`get_financial_statements`、`search_news`
-- 要求把"数据事实"和"分析判断"分开输出（`## DATA` / `## ANALYSIS` 格式）
-- 限制模型在缺少数据时胡乱推断
-- 让模型优先基于工具结果组织答案，而不是脱离结果自由发挥
-- 支持 `parallel_tool_calls`，多个工具可并行执行
+- “What is quantitative easing?”
+- “How does RSI work?”
+- “What is the difference between revenue and net income?”
 
-这样可以降低金融问答中最常见的问题：把模型印象当成实时市场数据。
+The knowledge flow is:
 
-### 3. Knowledge Agent Prompt
+1. Extract search terms from the user’s question with the LLM
+2. Search Wikipedia in the preferred language
+3. Fall back to English Wikipedia if needed
+4. Build a grounded answer from retrieved excerpts
+5. Return the answer with source labels and URLs
 
-目标是让模型只基于检索到的知识片段回答。
+## API
 
-设计重点：
+### Endpoints
 
-- 明确要求 grounded answer——模型只能引用检索到的上下文
-- 没有命中的信息时拒绝编造，输出标准拒答语
-- 保留来源信息，方便前端展示 `sources`
-- Wikipedia 回退有独立 Prompt，允许更自由地组织 Wikipedia 内容但仍要求注明来源
+- `GET /`
+- `GET /api/health`
+- `GET /api/providers`
+- `POST /api/query`
 
-这类 Prompt 的核心不是"写得更聪明"，而是把可回答范围收窄，确保知识型问答可解释。
-
-## 数据来源说明
-
-### 1. 市场数据来源
-
-主数据源是 `yfinance`：
-
-- 当前价格、涨跌幅、成交量、市值
-- 历史 K 线 / OHLCV
-- 技术指标（SMA、RSI、MACD、Bollinger Bands）
-- 基础财务报表（收入、资产负债表、现金流）
-
-可选增强数据源是 `Finnhub`：
-
-- 带摘要的公司新闻（精确到分钟的时间戳）
-- 基础财务指标和 EPS 历史
-
-当前实现里，`Finnhub` 不是必需项，未配置 API key 时系统自动降级到 yfinance 新闻。
-
-### 2. 知识数据来源
-
-知识问答的数据来自本地 Markdown 文档，路径为 [`backend/knowledge_base`](./backend/knowledge_base)。
-
-当前包括中英文主题文档：
-
-- `financial_basics.md` / `financial_basics_zh.md`
-- `technical_analysis.md` / `technical_analysis_zh.md`
-- `earnings_reports.md` / `earnings_reports_zh.md`
-- `market_concepts.md` / `market_concepts_zh.md`
-
-这些文档会在后端启动时自动进行：
-
-1. SHA-256 manifest 变更检测（无变更则跳过重建）
-2. Markdown header-aware 分块（按 `#` / `##` / `###` 分段，保留标题上下文）
-3. 句子边界分块，chunk_size ≈ 500 tokens（约 2000 字符），overlap ≈ 50 tokens
-4. OpenAI `text-embedding-3-small` 向量化并写入 ChromaDB（确定性 ID 支持 upsert）
-5. 查询时 cosine 相似度检索，distance > 0.7 的低相关 chunk 自动过滤
-6. 支持语言元数据过滤（中文问题优先检索 `_zh.md` 文档）
-
-**Wikipedia 回退**：当本地知识库无法覆盖用户问题时，系统通过 LLM 提取搜索关键词，调用 Wikipedia API 检索相关文章，作为 RAG 上下文生成回答。
-
-### 3. 配置数据来源
-
-环境变量定义在 [`backend/.env.example`](./backend/.env.example) 中，核心包括：
-
-| 变量                    | 必需 | 说明                              |
-| ----------------------- | ---- | --------------------------------- |
-| `OPENAI_API_KEY`        | 是   | 查询路由、答案生成、向量化        |
-| `OPENAI_MODEL`          | 否   | 默认 `gpt-5.1`                   |
-| `EMBEDDING_MODEL`       | 否   | 默认 `text-embedding-3-small`     |
-| `FINNHUB_API_KEY`       | 否   | 启用 Finnhub 增强新闻与财务数据   |
-| `ALPHA_VANTAGE_API_KEY` | 否   | 保留扩展位，尚未接入主流程        |
-
-## 接口说明
-
-后端主要接口：
-
-| 方法   | 路径              | 说明                              |
-| ------ | ----------------- | --------------------------------- |
-| `GET`  | `/`               | 服务信息                          |
-| `GET`  | `/api/health`     | 健康检查                          |
-| `GET`  | `/api/providers`  | 已配置的数据源列表（不暴露密钥）  |
-| `POST` | `/api/query`      | 主查询接口                        |
-
-示例请求：
+### Example Request
 
 ```json
-{ "query": "How has Tesla performed this year?" }
+{
+  "query": "How has Tesla performed this year?"
+}
 ```
 
-示例响应结构：
+### Example Response
 
 ```json
 {
@@ -219,7 +148,29 @@ https://github.com/user-attachments/assets/b4412dcb-2ad4-4d60-8c03-f2d57e5fc35e
 }
 ```
 
-## 本地运行方式
+## Configuration
+
+Backend environment variables are documented in [`backend/.env.example`](./backend/.env.example).
+
+### Backend Variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | Yes | Required for routing and answer generation |
+| `OPENAI_MODEL` | No | Defaults to `gpt-5.4` |
+| `FINNHUB_API_KEY` | No | Enables Finnhub news and financial enrichment |
+| `ALPHA_VANTAGE_API_KEY` | No | Reserved optional provider slot |
+| `ALLOWED_ORIGINS` | No | Comma-separated list of frontend origins allowed by CORS |
+
+### Frontend Variables
+
+Frontend build-time variables are documented in [`frontend/.env.example`](./frontend/.env.example).
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `VITE_API_URL` | No in local dev, Yes in deployment | Base URL for the backend API |
+
+## Local Development
 
 ### Backend
 
@@ -229,7 +180,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# 编辑 .env 填入 OPENAI_API_KEY
+# edit .env and set OPENAI_API_KEY
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -241,17 +192,17 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-可选配置：
+Optional local frontend config:
 
 ```bash
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
-未配置时默认请求 `http://localhost:8000`。
+If `VITE_API_URL` is not set, the frontend falls back to `http://localhost:8000` in development.
 
-### 一键启动
+### Helper Scripts
 
-根目录已提供：
+From the repo root:
 
 ```bash
 ./start.sh
@@ -259,61 +210,74 @@ VITE_API_URL=http://127.0.0.1:8000
 ./restart.sh
 ```
 
-其中：
+Defaults:
 
-- 后端默认启动在 `127.0.0.1:8000`
-- 前端默认启动在 `127.0.0.1:5173`
-- 日志写入 `.run/` 目录
+- backend: `127.0.0.1:8000`
+- frontend: `127.0.0.1:5173`
+- logs: `.run/`
 
-## 优化与扩展思考
+## Deploying to Render
 
-### 1. 路由层优化
+The repo includes [`render.yaml`](./render.yaml) for a simple two-service deployment:
 
-当前路由依赖单次 LLM 分类，优点是实现简单，缺点是边界问题仍可能误判。可优化方向：
+- one Render Web Service for the backend
+- one Render Static Site for the frontend
 
-- 增加规则层预判，例如 ticker / price / earnings 等关键词快速路由
-- 对模糊问题引入二次确认或多标签分类
-- 记录误分类样本，反向优化 Router Prompt
+### Recommended Deployment Method
 
-### 2. 市场数据能力扩展
+Use a Render Blueprint:
 
-当前以 `yfinance` 为主，适合开发与演示，但不适合强实时要求场景。可扩展为：
+1. Push the repo to GitHub
+2. In Render, click `New` -> `Blueprint`
+3. Select this repository
+4. Use the root `render.yaml`
+5. Review services and create the Blueprint
 
-- 引入 Alpha Vantage / Polygon / Finnhub 等多源聚合
-- 增加失败回退和数据一致性校验
-- 对新闻做时间排序、情绪分析和事件抽取
+### Backend Web Service Settings
 
-### 3. RAG 能力优化
+- Service Type: `Web Service`
+- Root Directory: `backend`
+- Runtime: `Python`
+- Build Command: `pip install -e .`
+- Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Health Check Path: `/api/health`
 
-当前知识库规模较小，本地 ChromaDB 足够；如果知识库继续扩展，可考虑：
+Recommended environment variables:
 
-- 更细粒度 chunk 策略（按段落或语义分块）
-- 引入 reranking 模型提升召回质量
-- 文档级元数据过滤，例如按主题、版本过滤
-- 引入增量更新机制，而不是仅靠全量重建
+- `OPENAI_API_KEY=<required>`
+- `OPENAI_MODEL=gpt-5.4`
+- `FINNHUB_API_KEY=<optional>`
+- `ALPHA_VANTAGE_API_KEY=<optional>`
+- `ALLOWED_ORIGINS=https://<your-frontend>.onrender.com`
 
-### 4. 前端交互优化
+If you also want local frontend access against the deployed backend:
 
-目前前端已经支持基本聊天流，但仍可继续增强：
+- `ALLOWED_ORIGINS=https://<your-frontend>.onrender.com,http://localhost:5173,http://127.0.0.1:5173`
 
-- 支持流式输出（SSE / WebSocket）
-- 支持历史会话持久化
-- 支持图表展示历史价格和技术指标
-- 对 market / knowledge 两类回答做更明确的可视化分区
+### Frontend Static Site Settings
 
-### 5. 工程化与部署优化
+- Service Type: `Static Site`
+- Root Directory: `frontend`
+- Build Command: `npm ci && npm run build`
+- Publish Directory: `dist`
 
-当前项目适合本地开发。若走向稳定部署，可继续补齐：
+Required environment variable:
 
-- Docker 化（前后端分离镜像 + docker-compose）
-- CI 测试与 lint 流程
-- 更完整的异常监控与日志采集
-- API 鉴权与限流
-- 生产环境配置分层
+- `VITE_API_URL=https://<your-backend>.onrender.com`
 
-## 测试
+### Post-Deploy Verification
 
-后端：
+1. Open `https://<backend>.onrender.com/api/health`
+2. Open `https://<backend>.onrender.com/api/providers`
+3. Load the frontend
+4. Run one market query and one knowledge query
+5. If browser requests fail, verify:
+   - `VITE_API_URL` points to the backend
+   - `ALLOWED_ORIGINS` includes the frontend domain
+
+## Testing
+
+### Backend
 
 ```bash
 cd backend
@@ -321,10 +285,42 @@ source .venv/bin/activate
 pytest
 ```
 
-前端：
+### Frontend
 
 ```bash
 cd frontend
 npm run lint
 npm run build
 ```
+
+## Project Structure
+
+```text
+backend/
+  agents/
+  api/
+  market/
+  rag/
+  tests/
+  config.py
+  main.py
+  pyproject.toml
+
+frontend/
+  public/
+  src/
+  package.json
+  vite.config.ts
+
+render.yaml
+README.md
+start.sh
+stop.sh
+restart.sh
+```
+
+## Notes
+
+- The backend no longer depends on ChromaDB.
+- Knowledge answers are only as good as the external retrieved context.
+- Wikipedia-backed answers are useful for general finance concepts, but they are not a substitute for authoritative regulatory or legal sources.

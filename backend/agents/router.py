@@ -1,7 +1,7 @@
 """LLM agent router: classifies queries and dispatches to market or knowledge handlers.
 
-Uses OpenAI with structured tool use for market data retrieval, and a RAG
-pipeline (local knowledge base + Wikipedia fallback) for knowledge queries.
+Uses OpenAI with structured tool use for market data retrieval, and external
+knowledge retrieval via Wikipedia for conceptual knowledge queries.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import Any
 from openai import OpenAI
 
 from .prompts import (
-    KNOWLEDGE_AGENT_PROMPT,
     KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT,
     MARKET_AGENT_PROMPT,
     ROUTER_PROMPT,
@@ -27,7 +26,6 @@ from market.yfinance_client import (
     get_price_history,
     get_technical_indicators,
 )
-from rag.pipeline import search_knowledge
 from rag.wikipedia_client import (
     get_term_extraction_prompt,
     parse_extracted_terms,
@@ -341,38 +339,9 @@ def _parse_market_response(text: str, ticker: str | None) -> dict:
     }
 
 
-_INSUFFICIENT_PHRASES = [
-    "does not contain sufficient information",
-    "does not contain information relevant",
-    "知识库中没有",
-    "没有足够的信息",
-    "无法从提供的",
-    "no relevant information",
-    "not contain enough information",
-]
-
-
-def _answer_is_insufficient(answer: str) -> bool:
-    """Check if the LLM's answer indicates the context was insufficient."""
-    answer_lower = answer.lower()
-    return any(phrase.lower() in answer_lower for phrase in _INSUFFICIENT_PHRASES)
-
-
 def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
-    """Run the knowledge base agent using retrieved context, with Wikipedia fallback."""
+    """Run the knowledge agent using external retrieval."""
     preferred_language = "zh" if re.search(r"[\u4e00-\u9fff]", query) else None
-    results = search_knowledge(query, n_results=5, preferred_language=preferred_language)
-
-    if results:
-        # Local KB has relevant results — generate answer
-        local_answer = _generate_knowledge_answer(query, results, client, source_type="local_kb")
-        # Check if the LLM determined the context was insufficient
-        if not _answer_is_insufficient(local_answer.get("answer", "")):
-            return local_answer
-        logger.info("Local KB results were not relevant enough, falling back to Wikipedia")
-
-    else:
-        logger.info("Local KB returned no results, falling back to Wikipedia")
 
     # Build LLM-powered term extraction function
     def llm_extract(q: str) -> list[str]:
@@ -395,8 +364,7 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
     if wiki_results:
         return _generate_knowledge_answer(query, wiki_results, client, source_type="wikipedia")
 
-    # Neither source had results
-    answer = "The knowledge base does not contain information relevant to this query."
+    answer = "External knowledge sources did not return information relevant to this query."
     return {
         "answer": answer,
         "data_section": None,
@@ -414,7 +382,7 @@ def _generate_knowledge_answer(
     client: OpenAI,
     source_type: str,
 ) -> dict:
-    """Generate an answer from knowledge results (local KB or Wikipedia)."""
+    """Generate an answer from retrieved knowledge results."""
     context_parts = []
     sources = set()
     for i, result in enumerate(results, 1):
@@ -426,8 +394,7 @@ def _generate_knowledge_answer(
         context_parts.append(f"--- Excerpt {i} (Source: {source}) ---\n{result['text']}")
 
     context = "\n\n".join(context_parts)
-    prompt = KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT if source_type == "wikipedia" else KNOWLEDGE_AGENT_PROMPT
-    system_prompt = f"{prompt}\n\n## Retrieved Context\n\n{context}"
+    system_prompt = f"{KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT}\n\n## Retrieved Context\n\n{context}"
 
     response = _chat_completion(
         client,

@@ -15,7 +15,6 @@ class ConfigTests(unittest.TestCase):
             {
                 "OPENAI_API_KEY": "test-openai",
                 "OPENAI_MODEL": "gpt-test",
-                "EMBEDDING_MODEL": "text-embedding-test",
             },
             clear=False,
         ):
@@ -24,8 +23,23 @@ class ConfigTests(unittest.TestCase):
 
         self.assertTrue(providers["openai"]["enabled"])
         self.assertEqual(providers["openai"]["model"], "gpt-test")
-        self.assertTrue(providers["openai_embeddings"]["enabled"])
-        self.assertEqual(providers["openai_embeddings"]["model"], "text-embedding-test")
         self.assertFalse(providers["finnhub"]["enabled"])
         self.assertTrue(providers["yfinance"]["enabled"])
+        get_settings.cache_clear()
+
+    def test_settings_parse_allowed_origins_configuration(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ALLOWED_ORIGINS": "https://frontend.onrender.com, http://localhost:5173",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(
+            settings.allowed_origins,
+            ("https://frontend.onrender.com", "http://localhost:5173"),
+        )
         get_settings.cache_clear()

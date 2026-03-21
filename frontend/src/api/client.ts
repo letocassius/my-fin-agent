@@ -4,7 +4,22 @@
 
 import type { QueryRequest, QueryResponse } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const DEFAULT_LOCAL_API_URL = "http://localhost:8000";
+
+function getApiBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_API_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/$/, "");
+  }
+
+  if (import.meta.env.DEV) {
+    return DEFAULT_LOCAL_API_URL;
+  }
+
+  return window.location.origin.replace(/\/$/, "");
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export class ApiClientError extends Error {
   status: number;

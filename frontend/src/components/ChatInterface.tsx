@@ -96,7 +96,7 @@ export function ChatInterface() {
             errorContent = err.detail ?? err.message;
           }
         } else if (err instanceof TypeError && (err as TypeError).message.includes("fetch")) {
-          errorContent = "Cannot connect to the backend. Ensure the server is running on port 8000.";
+          errorContent = "Cannot connect to the backend. Check that the API URL is correct and the backend service is reachable.";
         }
 
         const errorMessage: Message = {
@@ -152,7 +152,7 @@ export function ChatInterface() {
               </div>
               <p className="text-sm text-terminal-muted max-w-md leading-relaxed">
                 Ask about stock prices, market trends, or financial concepts.
-                Market queries fetch live data; knowledge queries use the built-in knowledge base.
+                Market queries fetch live data; knowledge queries use external reference sources.
               </p>
             </div>
 
