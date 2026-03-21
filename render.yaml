@@ -20,12 +20,12 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
 
-    - type: web
+  - type: web
     name: my-fin-agent-frontend
-        runtime: static
+    runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
-        publishPath: dist
+    publishPath: dist
     envVars:
       - key: VITE_API_URL
         sync: false
