@@ -34,6 +34,39 @@ from rag.wikipedia_client import (
 
 logger = logging.getLogger(__name__)
 
+COMPANY_TICKER_ALIASES = {
+    "同花顺": "300033.SZ",
+    "东方财富": "300059.SZ",
+    "贵州茅台": "600519.SS",
+    "宁德时代": "300750.SZ",
+    "比亚迪": "002594.SZ",
+    "招商银行": "600036.SS",
+    "中国平安": "601318.SS",
+    "腾讯": "0700.HK",
+    "腾讯控股": "0700.HK",
+    "阿里巴巴": "BABA",
+    "百度": "BIDU",
+    "京东": "JD",
+    "拼多多": "PDD",
+    "苹果": "AAPL",
+    "特斯拉": "TSLA",
+    "英伟达": "NVDA",
+    "微软": "MSFT",
+}
+
+MARKET_INTENT_PATTERNS = [
+    r"(?:今天|今日|现在|目前|当前).{0,8}(?:股价|价格|市值|行情)",
+    r"(?:股价|价格|市值|行情).{0,8}(?:多少|几多|是什么|怎么样)",
+    r"(?:涨了多少|跌了多少|涨跌|涨幅|跌幅|走势|表现)",
+    r"(?:最近|近).{0,6}(?:一周|一日|一天|五天|5天|一个月|1个月|一年|1年).{0,8}(?:股价|价格|走势|表现|变化)",
+]
+
+TICKER_PATTERNS = [
+    r"\b[A-Z]{1,5}\b",
+    r"\b\d{6}\.(?:SS|SZ)\b",
+    r"\b\d{4}\.HK\b",
+]
+
 MARKET_TOOLS = [
     {
         "type": "function",
@@ -200,6 +233,75 @@ def _extract_text_content(message: Any) -> str:
     return ""
 
 
+def _extract_candidate_ticker(query: str) -> str | None:
+    for pattern in TICKER_PATTERNS:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if not match:
+            continue
+        ticker = match.group(0).upper()
+        if re.fullmatch(r"\d{6}", ticker):
+            if ticker.startswith(("6", "9")):
+                return f"{ticker}.SS"
+            return f"{ticker}.SZ"
+        return ticker
+
+    digit_match = re.search(r"(?<!\d)(\d{6})(?!\d)", query)
+    if digit_match:
+        ticker = digit_match.group(1)
+        if ticker.startswith(("6", "9")):
+            return f"{ticker}.SS"
+        return f"{ticker}.SZ"
+    return None
+
+
+def _extract_company_alias_ticker(query: str) -> str | None:
+    for company_name, ticker in COMPANY_TICKER_ALIASES.items():
+        if company_name in query:
+            return ticker
+    return None
+
+
+def _looks_like_market_query(query: str) -> bool:
+    query_lower = query.lower()
+    english_market_keywords = [
+        "price",
+        "stock",
+        "ticker",
+        "performance",
+        "trend",
+        "surge",
+        "drop",
+        "rally",
+        "fell",
+        "market cap",
+        "$",
+    ]
+    if any(keyword in query_lower for keyword in english_market_keywords):
+        return True
+    return any(re.search(pattern, query) for pattern in MARKET_INTENT_PATTERNS)
+
+
+def _post_process_classification(query: str, classification: dict[str, Any]) -> dict[str, Any]:
+    query_type = classification.get("query_type", "knowledge")
+    ticker = classification.get("ticker")
+
+    inferred_ticker = _extract_candidate_ticker(query) or _extract_company_alias_ticker(query)
+    if not ticker and inferred_ticker:
+        classification["ticker"] = inferred_ticker
+        ticker = inferred_ticker
+
+    if _looks_like_market_query(query):
+        classification["query_type"] = "market"
+        classification.setdefault("period", "1mo")
+        if not classification.get("reasoning"):
+            classification["reasoning"] = "Heuristic market classification"
+
+    if classification.get("query_type") == "market" and not ticker and inferred_ticker:
+        classification["ticker"] = inferred_ticker
+
+    return classification
+
+
 def _classify_query(query: str, client: OpenAI) -> dict:
     """Use OpenAI to classify the query as market or knowledge."""
     response = _chat_completion(
@@ -215,18 +317,17 @@ def _classify_query(query: str, client: OpenAI) -> dict:
     content = _extract_text_content(response.choices[0].message)
 
     try:
-        return json.loads(content)
+        return _post_process_classification(query, json.loads(content))
     except json.JSONDecodeError:
         logger.warning(f"Router returned non-JSON: {content}")
-        query_lower = query.lower()
-        market_keywords = ["price", "stock", "ticker", "performance", "trend", "surge", "drop", "rally", "fell", "$"]
-        is_market = any(kw in query_lower for kw in market_keywords)
-        return {
+        is_market = _looks_like_market_query(query)
+        fallback = {
             "query_type": "market" if is_market else "knowledge",
             "ticker": None,
             "period": "1mo",
             "reasoning": "Fallback classification",
         }
+        return _post_process_classification(query, fallback)
 
 
 def _execute_tool_call(tool_name: str, tool_input: dict) -> str:

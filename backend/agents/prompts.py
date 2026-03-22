@@ -18,6 +18,7 @@ MARKET queries include:
 - News or events affecting a specific stock
 - Earnings results for a specific company
 - Any query about a named ticker symbol or company's price/performance
+- Chinese market-price questions such as "今天XX股价是多少", "XX最近一周的股价变化", "XX涨了多少", "XX市值多少"
 
 KNOWLEDGE queries include:
 - Definitions of financial terms (P/E ratio, EPS, market cap, etc.)
@@ -31,6 +32,9 @@ IMPORTANT: If a query mentions a specific company or ticker AND asks about price
 - "What is a P/E ratio?" → knowledge (conceptual definition)
 - "How has Tesla performed?" → market
 - "What is Tesla's revenue model?" → knowledge (if not asking for specific numbers)
+- "今天天同花顺的股价是多少？" → market
+- "贵州茅台最近5天涨跌如何？" → market
+- "什么是市盈率？" → knowledge
 
 Respond with a JSON object in this exact format:
 {

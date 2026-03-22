@@ -44,7 +44,7 @@ function StatusIndicator() {
 
 export default function App() {
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-terminal-bg text-terminal-text font-sans antialiased">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-terminal-bg text-terminal-text font-sans antialiased">
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-terminal-border bg-terminal-surface shrink-0">
         <div className="flex items-center gap-3">
