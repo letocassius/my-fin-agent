@@ -14,9 +14,9 @@ import yfinance as yf
 logger = logging.getLogger(__name__)
 
 PERIOD_MAP = {
-    "1d": "1d",
-    "5d": "5d",
-    "7d": "5d",  # yfinance doesn't have 7d, use 5d (trading days)
+    "1d": "5d",
+    "5d": "1mo",
+    "7d": "1mo",
     "1mo": "1mo",
     "30d": "1mo",
     "3mo": "3mo",
@@ -29,9 +29,9 @@ PERIOD_MAP = {
 }
 
 INTERVAL_MAP = {
-    "1d": "1m",
-    "5d": "5m",
-    "7d": "5m",
+    "1d": "1d",
+    "5d": "1d",
+    "7d": "1d",
     "1mo": "1d",
     "30d": "1d",
     "3mo": "1d",
@@ -41,6 +41,13 @@ INTERVAL_MAP = {
     "5y": "1mo",
     "ytd": "1d",
     "max": "1mo",
+}
+
+# How many trading days to return for short-period requests
+PERIOD_DAYS_LIMIT = {
+    "1d": 1,
+    "5d": 5,
+    "7d": 7,
 }
 
 
@@ -148,6 +155,11 @@ def get_price_history(ticker: str, period: str = "1mo") -> dict:
 
         if hist.empty:
             return {"error": f"No historical data found for {ticker}"}
+
+        # Trim to the requested number of trading days for short-period requests
+        days_limit = PERIOD_DAYS_LIMIT.get(period)
+        if days_limit is not None and len(hist) > days_limit:
+            hist = hist.iloc[-days_limit:]
 
         data = []
         for timestamp, row in hist.iterrows():
