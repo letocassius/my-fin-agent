@@ -332,8 +332,19 @@ def _classify_query(query: str, client: OpenAI) -> dict:
         return _post_process_classification(query, fallback)
 
 
+def _normalize_ticker(ticker: str) -> str:
+    """Add exchange suffix to bare 6-digit Chinese A-share codes."""
+    t = ticker.strip().upper()
+    if re.match(r"^\d{6}$", t):
+        return t + (".SS" if t.startswith("6") else ".SZ")
+    return t
+
+
 def _execute_tool_call(tool_name: str, tool_input: dict) -> str:
     """Execute a tool call and return the result as a JSON string."""
+    # Normalize Chinese tickers that may be missing their exchange suffix
+    if "ticker" in tool_input:
+        tool_input = {**tool_input, "ticker": _normalize_ticker(tool_input["ticker"])}
     try:
         if tool_name == "get_stock_price":
             result = get_current_price(tool_input["ticker"])
@@ -378,9 +389,10 @@ def _execute_tool_call(tool_name: str, tool_input: dict) -> str:
 
 def _run_market_agent(query: str, ticker: str, client: OpenAI) -> dict:
     """Run the market data agent with OpenAI tool use."""
+    user_content = f"[Resolved ticker: {ticker}]\n\n{query}"
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": MARKET_AGENT_PROMPT},
-        {"role": "user", "content": query},
+        {"role": "user", "content": user_content},
     ]
 
     for _ in range(5):
