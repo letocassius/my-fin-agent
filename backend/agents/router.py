@@ -444,39 +444,12 @@ def _parse_market_response(text: str, ticker: str | None) -> dict:
 
 
 def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
-    """Run the knowledge agent using external retrieval."""
-    preferred_language = "zh" if re.search(r"[\u4e00-\u9fff]", query) else None
-
-    # Build LLM-powered term extraction function
-    def llm_extract(q: str) -> list[str]:
-        resp = _chat_completion(
-            client,
-            [
-                {"role": "system", "content": get_term_extraction_prompt()},
-                {"role": "user", "content": q},
-            ],
-            max_completion_tokens=256,
-        )
-        raw = _extract_text_content(resp.choices[0].message)
-        terms = parse_extracted_terms(raw)
-        logger.info(f"LLM extracted search terms: {terms}")
-        return terms
-
-    wiki_language = "zh" if preferred_language == "zh" else "en"
-    wiki_results = search_wikipedia(query, language=wiki_language, llm_extract_fn=llm_extract)
-
-    if wiki_results:
-        return _generate_knowledge_answer(query, wiki_results, client)
-
-    web_results = search_public_web(query, llm_extract_fn=llm_extract, language=wiki_language)
-    if web_results:
-        return _generate_knowledge_answer(query, web_results, client)
-
+    """Run the knowledge agent using OpenAI web search."""
     web_search_answer = _run_knowledge_web_search_agent(query, client)
     if web_search_answer is not None:
         return web_search_answer
 
-    answer = "External knowledge sources did not return information relevant to this query."
+    answer = "Unable to retrieve information for this query from external sources."
     return {
         "answer": answer,
         "data_section": None,
@@ -489,7 +462,13 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
 
 
 def _run_knowledge_web_search_agent(query: str, client: OpenAI) -> dict | None:
-    """Use OpenAI's built-in web search as a final external retrieval fallback."""
+    """Use OpenAI's built-in web search for knowledge retrieval."""
+    is_chinese = bool(re.search(r"[\u4e00-\u9fff]", query))
+    location = (
+        {"type": "approximate", "country": "CN", "timezone": "Asia/Shanghai"}
+        if is_chinese
+        else {"type": "approximate", "country": "US", "timezone": "America/New_York"}
+    )
     try:
         response = client.responses.create(
             model=get_settings().openai_model,
@@ -498,11 +477,7 @@ def _run_knowledge_web_search_agent(query: str, client: OpenAI) -> dict | None:
             tools=[
                 {
                     "type": "web_search",
-                    "user_location": {
-                        "type": "approximate",
-                        "country": "US",
-                        "timezone": "America/New_York",
-                    },
+                    "user_location": location,
                 }
             ],
             include=["web_search_call.action.sources"],
