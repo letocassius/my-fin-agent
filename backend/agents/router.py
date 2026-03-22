@@ -15,6 +15,7 @@ from openai import OpenAI
 
 from .prompts import (
     KNOWLEDGE_AGENT_EXTERNAL_PROMPT,
+    KNOWLEDGE_AGENT_WEB_SEARCH_PROMPT,
     MARKET_AGENT_PROMPT,
     ROUTER_PROMPT,
 )
@@ -471,6 +472,10 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
     if web_results:
         return _generate_knowledge_answer(query, web_results, client)
 
+    web_search_answer = _run_knowledge_web_search_agent(query, client)
+    if web_search_answer is not None:
+        return web_search_answer
+
     answer = "External knowledge sources did not return information relevant to this query."
     return {
         "answer": answer,
@@ -481,6 +486,76 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
         "sources": [],
         "source_type": "knowledge",
     }
+
+
+def _run_knowledge_web_search_agent(query: str, client: OpenAI) -> dict | None:
+    """Use OpenAI's built-in web search as a final external retrieval fallback."""
+    try:
+        response = client.responses.create(
+            model=get_settings().openai_model,
+            input=query,
+            instructions=KNOWLEDGE_AGENT_WEB_SEARCH_PROMPT,
+            tools=[
+                {
+                    "type": "web_search",
+                    "user_location": {
+                        "type": "approximate",
+                        "country": "US",
+                        "timezone": "America/New_York",
+                    },
+                }
+            ],
+            include=["web_search_call.action.sources"],
+        )
+    except Exception as exc:
+        logger.warning(f"OpenAI web search fallback failed: {exc}")
+        return None
+
+    answer = getattr(response, "output_text", "").strip()
+    if not answer:
+        return None
+
+    sources = _extract_response_sources(response)
+    return {
+        "answer": answer,
+        "data_section": None,
+        "analysis_section": answer,
+        "query_type": "knowledge",
+        "ticker": None,
+        "sources": sources,
+        "source_type": "knowledge",
+    }
+
+
+def _extract_response_sources(response: Any) -> list[str]:
+    """Extract cited source titles/URLs from a Responses API web-search result."""
+    sources: list[str] = []
+    seen: set[str] = set()
+
+    for item in getattr(response, "output", []) or []:
+        action = getattr(item, "action", None)
+        for source in getattr(action, "sources", []) or []:
+            title = getattr(source, "title", None) or "Source"
+            url = getattr(source, "url", None) or ""
+            display = f"{title} ({url})" if url else title
+            if display not in seen:
+                seen.add(display)
+                sources.append(display)
+
+        content = getattr(item, "content", None) or []
+        for part in content:
+            annotations = getattr(part, "annotations", None) or []
+            for annotation in annotations:
+                if getattr(annotation, "type", None) != "url_citation":
+                    continue
+                title = getattr(annotation, "title", None) or "Source"
+                url = getattr(annotation, "url", None) or ""
+                display = f"{title} ({url})" if url else title
+                if display not in seen:
+                    seen.add(display)
+                    sources.append(display)
+
+    return sources
 
 
 def _generate_knowledge_answer(
