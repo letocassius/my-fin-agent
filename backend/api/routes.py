@@ -28,7 +28,7 @@ class QueryResponse(BaseModel):
     query_type: str  # "market" or "knowledge"
     ticker: str | None = None
     latency_ms: float | None = None
-    source_type: str | None = None  # "wikipedia" or "none"
+    source_type: str | None = None  # "market" or "knowledge"
 
 
 class HealthResponse(BaseModel):

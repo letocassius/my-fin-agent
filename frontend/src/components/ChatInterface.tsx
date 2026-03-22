@@ -137,9 +137,9 @@ export function ChatInterface() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full gap-8 py-12">
             {/* Empty state */}
@@ -192,7 +192,7 @@ export function ChatInterface() {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-terminal-border bg-terminal-surface px-4 py-3">
+      <div className="shrink-0 border-t border-terminal-border bg-terminal-surface px-4 py-3">
         <div className="flex items-end gap-3 max-w-4xl mx-auto">
           <span className="font-mono text-terminal-green text-sm mb-2.5 select-none">$</span>
           <div className="flex-1 relative">

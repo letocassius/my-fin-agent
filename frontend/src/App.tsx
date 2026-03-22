@@ -44,7 +44,7 @@ function StatusIndicator() {
 
 export default function App() {
   return (
-    <div className="flex flex-col h-screen bg-terminal-bg text-terminal-text font-sans antialiased">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-terminal-bg text-terminal-text font-sans antialiased">
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-terminal-border bg-terminal-surface shrink-0">
         <div className="flex items-center gap-3">
@@ -75,8 +75,8 @@ export default function App() {
       </header>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full max-w-4xl mx-auto w-full">
+      <main className="flex-1 min-h-0 overflow-hidden">
+        <div className="mx-auto h-full min-h-0 w-full max-w-4xl">
           <ChatInterface />
         </div>
       </main>

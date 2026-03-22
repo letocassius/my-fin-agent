@@ -1,7 +1,7 @@
 """LLM agent router: classifies queries and dispatches to market or knowledge handlers.
 
 Uses OpenAI with structured tool use for market data retrieval, and external
-knowledge retrieval via Wikipedia for conceptual knowledge queries.
+knowledge retrieval for conceptual knowledge queries.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 from openai import OpenAI
 
 from .prompts import (
-    KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT,
+    KNOWLEDGE_AGENT_EXTERNAL_PROMPT,
     MARKET_AGENT_PROMPT,
     ROUTER_PROMPT,
 )
@@ -336,6 +336,7 @@ def _parse_market_response(text: str, ticker: str | None) -> dict:
         "query_type": "market",
         "ticker": ticker,
         "sources": ["Yahoo Finance (yfinance)"] + (["Finnhub"] if "finnhub" in text.lower() or "Summary:" in text else []),
+        "source_type": "market",
     }
 
 
@@ -362,7 +363,7 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
     wiki_results = search_wikipedia(query, language=wiki_language, llm_extract_fn=llm_extract)
 
     if wiki_results:
-        return _generate_knowledge_answer(query, wiki_results, client, source_type="wikipedia")
+        return _generate_knowledge_answer(query, wiki_results, client)
 
     answer = "External knowledge sources did not return information relevant to this query."
     return {
@@ -372,7 +373,7 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
         "query_type": "knowledge",
         "ticker": None,
         "sources": [],
-        "source_type": "none",
+        "source_type": "knowledge",
     }
 
 
@@ -380,21 +381,20 @@ def _generate_knowledge_answer(
     query: str,
     results: list[dict],
     client: OpenAI,
-    source_type: str,
 ) -> dict:
     """Generate an answer from retrieved knowledge results."""
     context_parts = []
     sources = set()
     for i, result in enumerate(results, 1):
         metadata = result.get("metadata", {}) or {}
-        source = metadata.get("source_label") or metadata.get("source", "unknown")
+        source = metadata.get("title") or metadata.get("source_label") or metadata.get("source", "unknown")
         url = metadata.get("url", "")
         source_display = f"{source} ({url})" if url else source
         sources.add(source_display)
         context_parts.append(f"--- Excerpt {i} (Source: {source}) ---\n{result['text']}")
 
     context = "\n\n".join(context_parts)
-    system_prompt = f"{KNOWLEDGE_AGENT_WIKIPEDIA_PROMPT}\n\n## Retrieved Context\n\n{context}"
+    system_prompt = f"{KNOWLEDGE_AGENT_EXTERNAL_PROMPT}\n\n## Retrieved Context\n\n{context}"
 
     response = _chat_completion(
         client,
@@ -413,7 +413,7 @@ def _generate_knowledge_answer(
         "query_type": "knowledge",
         "ticker": None,
         "sources": sorted(list(sources)),
-        "source_type": source_type,
+        "source_type": "knowledge",
     }
 
 

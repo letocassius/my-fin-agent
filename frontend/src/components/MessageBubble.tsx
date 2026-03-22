@@ -3,7 +3,7 @@
  *
  * For user messages: simple right-aligned bubble.
  * For assistant messages:
- *   - Shows query type badge (MARKET DATA / KNOWLEDGE BASE)
+ *   - Shows query type badge (MARKET / KNOWLEDGE)
  *   - For market answers: shows DATA card + ANALYSIS section
  *   - For knowledge answers: shows answer + sources list
  */
@@ -16,9 +16,8 @@ interface MessageBubbleProps {
   message: Message;
 }
 
-function QueryTypeBadge({ queryType, sourceType }: { queryType: "market" | "knowledge"; sourceType?: string | null }) {
+function QueryTypeBadge({ queryType }: { queryType: "market" | "knowledge" }) {
   const isMarket = queryType === "market";
-  const isWikipedia = sourceType === "wikipedia";
 
   let colorClasses: string;
   let dotClasses: string;
@@ -27,15 +26,11 @@ function QueryTypeBadge({ queryType, sourceType }: { queryType: "market" | "know
   if (isMarket) {
     colorClasses = "bg-terminal-blue/10 text-terminal-blue border-terminal-blue/30";
     dotClasses = "bg-terminal-blue";
-    label = "Market Data";
-  } else if (isWikipedia) {
-    colorClasses = "bg-terminal-green/10 text-terminal-green border-terminal-green/30";
-    dotClasses = "bg-terminal-green";
-    label = "Wikipedia";
+    label = "Market";
   } else {
     colorClasses = "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30";
     dotClasses = "bg-terminal-purple";
-    label = "Knowledge Base";
+    label = "Knowledge";
   }
 
   return (
@@ -107,7 +102,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* Header row: type badge + latency */}
         <div className="flex items-center gap-2 mb-2">
           {message.query_type && !message.error && (
-            <QueryTypeBadge queryType={message.query_type} sourceType={message.source_type} />
+            <QueryTypeBadge queryType={message.query_type} />
           )}
           {message.latency_ms !== undefined && message.latency_ms !== null && (
             <LatencyBadge ms={message.latency_ms} />
