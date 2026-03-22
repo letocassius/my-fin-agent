@@ -490,7 +490,7 @@ def _run_knowledge_web_search_agent(query: str, client: OpenAI) -> dict | None:
     if not answer:
         return None
 
-    sources = _extract_response_sources(response)
+    sources = _extract_response_sources(response)[:5]
     return {
         "answer": answer,
         "data_section": None,

@@ -155,4 +155,4 @@ Example structure for a multi-part question:
 ...
 
 At the end, include:
-**Sources:** [short list of the most relevant cited sources]"""
+**Sources:** [list 3 to 5 of the most relevant cited sources only — no more]"""
