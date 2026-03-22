@@ -31,6 +31,7 @@ from rag.wikipedia_client import (
     parse_extracted_terms,
     search_wikipedia,
 )
+from rag.web_search_client import search_public_web
 
 logger = logging.getLogger(__name__)
 
@@ -465,6 +466,10 @@ def _run_knowledge_agent(query: str, client: OpenAI) -> dict:
 
     if wiki_results:
         return _generate_knowledge_answer(query, wiki_results, client)
+
+    web_results = search_public_web(query, llm_extract_fn=llm_extract, language=wiki_language)
+    if web_results:
+        return _generate_knowledge_answer(query, web_results, client)
 
     answer = "External knowledge sources did not return information relevant to this query."
     return {
